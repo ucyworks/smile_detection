@@ -2,10 +2,9 @@ import cv2
 import numpy as np
 from deepface import DeepFace
 import base64
-import time
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any
 
-class EmotionDetector:
+class EmotionService:
     def __init__(self):
         # Duygu etiketlerini Türkçeleştir
         self.emotion_labels = {
@@ -104,78 +103,3 @@ class EmotionDetector:
             
         except Exception as e:
             return {"error": f"Image processing error: {str(e)}"}
-
-# Test için yerel çalıştırma
-def detect_emotions():
-    detector = EmotionDetector()
-    cap = cv2.VideoCapture(0)
-    
-    if not cap.isOpened():
-        print("Kamera açılamadı!")
-        return
-        
-    prev_time = 0
-    
-    try:
-        while cap.isOpened():
-            success, frame = cap.read()
-            if not success:
-                break
-                
-            # FPS hesapla
-            current_time = time.time()
-            fps = 1 / (current_time - prev_time) if (current_time - prev_time) > 0 else 0
-            prev_time = current_time
-            
-            result = detector.analyze_image(frame)
-            
-            if "error" not in result:
-                # Yüz konumunu al
-                face_loc = result["face_location"]
-                x, y, w, h = face_loc["x"], face_loc["y"], face_loc["width"], face_loc["height"]
-                
-                # Renk seçimi (mutluluk seviyesine göre)
-                happiness_level = result["happiness_level"]
-                if happiness_level > 80:
-                    color = (0, 255, 255)  # Sarı (çok mutlu)
-                elif happiness_level > 50:
-                    color = (0, 255, 0)    # Yeşil (mutlu)
-                elif happiness_level > 20:
-                    color = (0, 165, 255)  # Turuncu (az mutlu)
-                else:
-                    color = (0, 0, 255)    # Kırmızı (mutsuz)
-                
-                # Yüz çerçevesini çiz
-                cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
-                
-                # Duygu durumunu ve yüzdesini yaz
-                dominant = result["dominant_emotion"]
-                text = f"{dominant['turkish_name']}: %{int(dominant['score'])}"
-                cv2.putText(frame, text, (x, y-10), 
-                          cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
-                
-                # Tüm duygu yüzdelerini göster
-                y_offset = 30
-                for emotion, data in result["all_emotions"].items():
-                    text = f"{data['turkish_name']}: %{int(data['score'])}"
-                    cv2.putText(frame, text, (10, y_offset), 
-                              cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-                    y_offset += 30
-            
-            # FPS göster
-            cv2.putText(frame, f"FPS: {int(fps)}", (10, frame.shape[0] - 10), 
-                      cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            
-            cv2.imshow("Duygu Analizi", frame)
-            
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
-                
-    except Exception as e:
-        print(f"Hata oluştu: {e}")
-    finally:
-        cap.release()
-        cv2.destroyAllWindows()
-
-if __name__ == "__main__":
-    detect_emotions()
