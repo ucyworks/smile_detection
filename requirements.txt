@@ -13,3 +13,6 @@ pydantic-settings>=2.0.3
 python-dotenv==1.0.0
 python-multipart>=0.0.6
 opencv-python-headless>=4.8.0
+# Optional - for deep learning model support
+tensorflow>=2.10.0; platform_machine != "armv7l"
+tensorflow-io-gcs-filesystem>=0.23.1; platform_machine != "armv7l"
