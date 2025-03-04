@@ -5,39 +5,36 @@ import numpy as np
 from typing import Dict, Any
 import os
 from pathlib import Path
-from fer import FER
 
 class EmotionService:
     def __init__(self):
         # Initialize face detection model
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
         
-        # Initialize FER (Facial Emotion Recognition) detector
+        # Load pre-trained emotion recognition model if available
+        models_dir = Path(__file__).parent.parent / "models"
+        
+        # Initialize emotion detection model
         try:
-            self.emotion_detector = FER()
-            self.using_fer = True
-            print("FER emotion detector initialized successfully")
-        except Exception as e:
-            print(f"Failed to initialize FER: {e}")
-            self.using_fer = False
+            # Try loading a pre-trained model - here we're using FER (Facial Emotion Recognition) model
+            # You may need to download and save these files in your models directory
+            self.emotion_model_path = os.path.join(models_dir, "emotion_model.h5")
             
-        # Fallback: try to load TensorFlow model if FER is not available
-        if not self.using_fer:
+            # If you use TensorFlow/Keras model:
+            # Try importing TensorFlow first
             try:
-                models_dir = Path(__file__).parent.parent / "models"
-                self.emotion_model_path = os.path.join(models_dir, "emotion_model.h5")
-                
                 import tensorflow as tf
                 if os.path.exists(self.emotion_model_path):
                     self.emotion_model = tf.keras.models.load_model(self.emotion_model_path)
                     self.using_tf_model = True
-                    print("TensorFlow emotion model loaded successfully")
                 else:
                     self.using_tf_model = False
-                    print("TensorFlow emotion model file not found")
-            except Exception as e:
-                print(f"Failed to load TensorFlow emotion model: {e}")
+            except ImportError:
                 self.using_tf_model = False
+                
+        except Exception as e:
+            print(f"Failed to load emotion model: {e}")
+            self.using_tf_model = False
     
     def process_base64_image(self, base64_image: str) -> Dict[str, Any]:
         """Process a base64 encoded image and detect emotions"""
@@ -56,71 +53,42 @@ class EmotionService:
             if img is None:
                 return {"error": "Invalid image data"}
             
+            # Convert to grayscale for face detection
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            
+            # Detect faces
+            faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
+            
             processing_time = time.time() - start_time
             
-            # If using FER, detect emotions directly on the image
-            if self.using_fer:
-                # FER works with RGB images, OpenCV uses BGR
-                rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                result = self.emotion_detector.detect_emotions(rgb_img)
+            if len(faces) > 0:
+                # Get the largest face
+                largest_face = max(faces, key=lambda rect: rect[2] * rect[3])
+                x, y, w, h = largest_face
                 
-                if result and len(result) > 0:
-                    # Get the first detected face (usually the most prominent)
-                    face = result[0]
-                    emotions = face['emotions']
-                    
-                    # Find emotion with highest confidence
-                    max_emotion = max(emotions.items(), key=lambda x: x[1])
-                    emotion_name = max_emotion[0]
-                    confidence = max_emotion[1]
-                    
-                    print(f"Detected emotions: {emotions}")
-                    
-                    return {
-                        "emotion": emotion_name,
-                        "confidence": float(confidence),
-                        "processing_time": processing_time
-                    }
-                else:
-                    return {
-                        "emotion": "no face detected",
-                        "confidence": 0.0,
-                        "processing_time": processing_time
-                    }
+                # Extract face ROI
+                face_roi = gray[y:y+h, x:x+w]
+                
+                # Use emotion detection logic
+                emotion, confidence = self._detect_emotion(face_roi)
+                
+                return {
+                    "emotion": emotion, 
+                    "confidence": confidence, 
+                    "processing_time": processing_time
+                }
             else:
-                # Fall back to our custom detection method
-                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
-                
-                if len(faces) > 0:
-                    # Get the largest face
-                    largest_face = max(faces, key=lambda rect: rect[2] * rect[3])
-                    x, y, w, h = largest_face
-                    
-                    # Extract face ROI
-                    face_roi = gray[y:y+h, x:x+w]
-                    
-                    # Use emotion detection logic
-                    emotion, confidence = self._detect_emotion(face_roi)
-                    
-                    return {
-                        "emotion": emotion, 
-                        "confidence": confidence, 
-                        "processing_time": processing_time
-                    }
-                else:
-                    return {
-                        "emotion": "no face detected",
-                        "confidence": 0.0,
-                        "processing_time": processing_time
-                    }
+                return {
+                    "emotion": "no face detected",
+                    "confidence": 0.0,
+                    "processing_time": processing_time
+                }
                 
         except Exception as e:
-            print(f"Error processing image: {str(e)}")
             return {"error": f"Image processing error: {str(e)}"}
     
     def _detect_emotion(self, face_roi):
-        """Custom emotion detection as fallback when FER is not available"""
+        """Detect emotion from face image"""
         try:
             if self.using_tf_model:
                 # If TensorFlow model is available, use it
@@ -139,84 +107,46 @@ class EmotionService:
                 # Map to emotion labels
                 emotions = ['angry', 'disgust', 'fear', 'happy', 'sad', 'surprise', 'neutral']
                 emotion = emotions[emotion_idx]
-                
-                print(f"TF model predictions: {list(zip(emotions, predictions[0]))}")
-                
-                return emotion, confidence
             else:
-                # Advanced fallback using various facial feature detectors
-                # This approach uses multiple cascades to detect different expressions
+                # Fallback to simple smile detection if no model is available
                 smile_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_smile.xml')
-                eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml')
                 
-                # Resize for consistent detection
-                resized_face = cv2.resize(face_roi, (200, 200))
+                # Resize for better detection
+                resized_face = cv2.resize(face_roi, (250, 250))
                 
-                # Dictionary to store emotion confidences
-                emotions = {
-                    'happy': 0.0,
-                    'sad': 0.0,
-                    'angry': 0.0,
-                    'surprise': 0.0,
-                    'neutral': 0.0
-                }
-                
-                # Detect smiles - indicator of happiness
+                # Detect smiles
                 smiles = smile_cascade.detectMultiScale(
                     resized_face,
-                    scaleFactor=1.8,
-                    minNeighbors=15,
+                    scaleFactor=1.7,
+                    minNeighbors=22,
                     minSize=(25, 25)
                 )
                 
+                # Calculate confidence based on smile detection results
                 if len(smiles) > 0:
-                    # Calculate happiness confidence based on smile size
+                    # If smiles detected, calculate confidence based on size relative to face
                     largest_smile = max(smiles, key=lambda rect: rect[2] * rect[3])
                     smile_area = largest_smile[2] * largest_smile[3]
-                    face_area = 200 * 200
-                    emotions['happy'] = min(0.9, smile_area / (face_area * 0.3))
-                
-                # Detect eyes - useful for various emotions
-                eyes = eye_cascade.detectMultiScale(resized_face)
-                
-                # Eye detection for surprise (wide open eyes)
-                if len(eyes) >= 2:
-                    # Calculate average eye size
-                    avg_eye_area = sum(e[2] * e[3] for e in eyes) / len(eyes)
-                    face_area = 200 * 200
+                    face_area = 250 * 250
+                    confidence = min(0.95, smile_area / (face_area * 0.5))
+                    emotion = "happy"
+                else:
+                    # If no smile detected, check for other features
+                    # This is a simplified approach; a real model would be more nuanced
+                    # Here we use simple histogram analysis as a rough proxy
+                    hist = cv2.calcHist([resized_face], [0], None, [256], [0, 256])
+                    brightness = np.mean(resized_face)
                     
-                    # Larger eyes might indicate surprise
-                    if avg_eye_area > (face_area * 0.02):
-                        emotions['surprise'] = min(0.7, avg_eye_area / (face_area * 0.05))
-                
-                # Analyze image statistics for other emotions
-                brightness = np.mean(resized_face)
-                contrast = np.std(resized_face)
-                
-                # Lower brightness might correlate with negative emotions
-                if brightness < 100:
-                    emotions['sad'] = 0.5 + (100 - brightness) / 200
-                    emotions['angry'] = 0.3 + (100 - brightness) / 300
-                
-                # Higher contrast might indicate stronger expressions
-                if contrast > 50:
-                    # Increase all emotions slightly based on contrast
-                    for emotion in emotions:
-                        if emotions[emotion] > 0:
-                            emotions[emotion] = min(0.95, emotions[emotion] + (contrast - 50) / 200)
-                
-                # If no strong emotions detected, default to neutral
-                if all(conf < 0.4 for conf in emotions.values()):
-                    emotions['neutral'] = 0.7
-                
-                # Find the dominant emotion
-                dominant_emotion = max(emotions.items(), key=lambda x: x[1])
-                
-                print(f"Custom detection emotions: {emotions}")
-                
-                return dominant_emotion[0], dominant_emotion[1]
+                    if brightness < 100:  # Darker expression
+                        emotion = "sad"
+                        confidence = 0.6
+                    else:
+                        emotion = "neutral"
+                        confidence = 0.7
+            
+            return emotion, float(confidence)
             
         except Exception as e:
-            print(f"Error in _detect_emotion: {e}")
+            print(f"Error in emotion detection: {e}")
             # Return neutral as fallback
             return "neutral", 0.5
