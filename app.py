@@ -74,7 +74,10 @@ async def detect_emotion(request: EmotionDetectionRequest):
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint for monitoring"""
+    """
+    Health check endpoint for Railway and other platforms.
+    Returns a simple 200 OK response to indicate the service is up and running.
+    """
     return {"status": "healthy"}
 
 # Error handler
