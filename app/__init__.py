@@ -1,1 +1,1 @@
-# This file allows the directory to be imported as a package
+# This file makes the app directory a Python package
